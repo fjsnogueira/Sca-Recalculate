@@ -1,10 +1,7 @@
 ﻿using Microsoft.Extensions.Configuration;
 using System;
 using System.IO;
-using Checkmarx.API.SCA;
-using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
-using System.Collections.Generic;
 using Checkmarx.API;
 using System.Linq;
 
@@ -19,20 +16,12 @@ namespace Sca_Recalculate
             ServiceCollection serviceCollection = new ServiceCollection();
 
             ConfigureServices(serviceCollection);
-
-            string scaUsername  = configuration["Username"];
-            string scaPassword  = configuration["Password"];
-            string scaTenant    = configuration["Tenant"];
-            string scaACURL     = configuration["ACURL"];
-            string scaAPIURL    = configuration["APIURL"];
-
-            List<Vulnerability> Vulns = new List<Vulnerability>();
-
-            string[] cves = new[]{
-                "CVE-2021-44228",
-                "CVE-2021-45105",
-                "CVE-2021-45046"
-            };
+            
+            string scaUsername  = configuration["SCA_USERNAME"];
+            string scaPassword  = configuration["SCA_PASSWORD"];
+            string scaTenant    = configuration["SCA_TENANT"];
+            string scaACURL     = configuration["SCA_ACURL"];
+            string scaAPIURL    = configuration["SCA_APIURL"];
 
             var client = new SCAClient(scaTenant, scaUsername, scaPassword, scaACURL, scaAPIURL);
 
@@ -52,30 +41,19 @@ namespace Sca_Recalculate
             foreach (var p in projectsWithSucessfullScans)
             {
                 var projectId = p.ProjectId;
+
                 var lastSucessfullScanId = Guid.Parse(p.LastScanId.ToString());
 
                 var riskReport = client.ClientSCA
                     .RiskReportsAsync(projectId, 1).Result.First();
 
-                var lastScanDate = riskReport.CreatedOn;
+                bool lastScanBefore13Dec = riskReport.CreatedOn.UtcDateTime 
+                    <= new DateTime(2021,12,13);
 
-                var projectVulnerabilities = client.ClientSCA
-                    .VulnerabilitiesAsync(lastSucessfullScanId).Result;
-
-                var log4jVulnerabilites = projectVulnerabilities
-                    .Select(x => x.CveName)
-                    .Where(x => cves.Contains(x))
-                    .Distinct()
-                    .ToList();
-
-                if (log4jVulnerabilites.Count > 0)
+                if(lastScanBefore13Dec)
                 {
                     string newScanId = client.ClientSCA.RecalculateAsync(p.ProjectId).Result;
-
-                    Console.WriteLine(lastScanDate.ToUniversalTime());
                     Console.WriteLine("triggered recalculation, new scanId : " + newScanId);
-                    Console.WriteLine(JsonSerializer.Serialize(log4jVulnerabilites, new JsonSerializerOptions { WriteIndented = true }));
-                    Console.WriteLine(JsonSerializer.Serialize(p, new JsonSerializerOptions { WriteIndented = true }));
                 }
             }
 
@@ -87,11 +65,11 @@ namespace Sca_Recalculate
             // Build configuration
             configuration = new ConfigurationBuilder()
                 .SetBasePath(Directory.GetParent(AppContext.BaseDirectory).FullName)
-#if DEBUG
-                .AddJsonFile("appsettings.dev.json", false)
-#else
-                .AddJsonFile("appsettings.json", false)
+#if NOTDEBUG
+                .AddJsonFile("appsettings.json", true)
 #endif
+                .AddUserSecrets("3a219217-d81a-4f2b-a435-c40c96f4ea75")
+                .AddEnvironmentVariables()
                 .Build();
         }
     }
